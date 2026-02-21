@@ -1,0 +1,220 @@
+{
+  "name": "GOPELIA Intake Automation Workflow",
+  "meta": {
+    "description": "Automates ITB intake: triggers from estimates@ Gmail, classifies emails, forwards or declines, and logs data.",
+    "version": "0.1.0",
+    "author": "Automated Agent"
+  },
+  "nodes": [
+    {
+      "id": "e2c0f87b-22ec-4102-b445-752dffc8ff5f",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyHour"
+            }
+          ]
+        },
+        "filters": {
+          "query": "subject:(ITB OR 'Invitation to Bid' OR RFP)"
+        },
+        "options": {
+          "downloadAttachments": false
+        }
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "GMAIL_ESTIMATES_CREDENTIAL_ID",
+          "name": "estimates@gopelia.com"
+        }
+      }
+    },
+    {
+      "id": "943e7f09-96f7-49b7-8487-281ee7bda3bf",
+      "name": "Classify Email",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        300,
+        0
+      ],
+      "parameters": {
+        "functionCode": "\n// Extract sender, subject, domain and simple category\nconst sender = $json.from && $json.from.email ? $json.from.email : $json.from;\nconst subject = $json.subject || '';\nconst body = $json.text || '';\nconst domain = sender ? sender.split('@')[1].toLowerCase() : '';\n\n// Initial category\nlet category = 'Cold';\n\n// Small works keywords to auto-decline\nconst smallKeywords = ['rail', 'handrail', 'punch list', 'misc'];\nconst content = `${subject} ${body}`.toLowerCase();\nif (smallKeywords.some(k => content.includes(k))) {\n    category = 'Small Works';\n}\n\nreturn [{ json: { sender, domain, subject, category } }];\n"
+      }
+    },
+    {
+      "id": "00ce6476-2bb1-4972-a41f-79dc2ab63de7",
+      "name": "Check Small Works",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        600,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.category }}",
+              "operation": "equal",
+              "value2": "Small Works"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a90d854e-ef17-4539-b48f-92b6c1599f54",
+      "name": "Send Decline Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        900,
+        -150
+      ],
+      "parameters": {
+        "operation": "send",
+        "to": "={{ $json.sender }}",
+        "subject": "={{ 'Declined: ' + $json.subject }}",
+        "message": "Thank you for your invitation. After reviewing the scope, we must respectfully decline bids under $100k unless part of a strategic relationship."
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "GMAIL_INTAKE_CREDENTIAL_ID",
+          "name": "intake@gopelia.com"
+        }
+      }
+    },
+    {
+      "id": "3de3651b-2719-4acf-a433-06dc23d50bbb",
+      "name": "Forward Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        900,
+        150
+      ],
+      "parameters": {
+        "operation": "send",
+        "to": "intake@gopelia.com",
+        "subject": "={{ 'ITB: ' + $json.subject }}",
+        "message": "New ITB forwarded for qualification. See details below:\n\nSender: {{ $json.sender }}\nDomain: {{ $json.domain }}\nSubject: {{ $json.subject }}\nCategory: {{ $json.category }}",
+        "additionalFields": {
+          "from": "estimates@gopelia.com",
+          "cc": "",
+          "bcc": ""
+        }
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "GMAIL_ESTIMATES_CREDENTIAL_ID",
+          "name": "estimates@gopelia.com"
+        }
+      }
+    },
+    {
+      "id": "213f3dff-aa04-4ed5-b50e-f53737ea2647",
+      "name": "Log to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ],
+      "parameters": {
+        "operation": "append",
+        "sheetId": "GOOGLE_SHEET_ID",
+        "range": "A1",
+        "dataStartRow": 2,
+        "columns": {
+          "values": {
+            "Timestamp": "={{ new Date().toISOString() }}",
+            "Sender": "={{ $json.sender }}",
+            "Domain": "={{ $json.domain }}",
+            "Subject": "={{ $json.subject }}",
+            "Category": "={{ $json.category }}"
+          }
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_SHEETS_CRED_ID",
+          "name": "Google Sheets Credentials"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "e2c0f87b-22ec-4102-b445-752dffc8ff5f": {
+      "main": [
+        [
+          {
+            "node": "943e7f09-96f7-49b7-8487-281ee7bda3bf",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "943e7f09-96f7-49b7-8487-281ee7bda3bf": {
+      "main": [
+        [
+          {
+            "node": "00ce6476-2bb1-4972-a41f-79dc2ab63de7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "00ce6476-2bb1-4972-a41f-79dc2ab63de7": {
+      "main": [
+        [
+          {
+            "node": "a90d854e-ef17-4539-b48f-92b6c1599f54",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "3de3651b-2719-4acf-a433-06dc23d50bbb",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "a90d854e-ef17-4539-b48f-92b6c1599f54": {
+      "main": [
+        [
+          {
+            "node": "213f3dff-aa04-4ed5-b50e-f53737ea2647",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3de3651b-2719-4acf-a433-06dc23d50bbb": {
+      "main": [
+        [
+          {
+            "node": "213f3dff-aa04-4ed5-b50e-f53737ea2647",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
